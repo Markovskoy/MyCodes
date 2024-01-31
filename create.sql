@@ -1,1 +1,4 @@
-CREATE DATABASE new_database(index serial, some_text INT(15));
+CREATE TABLE new_table2(
+	index serial, 
+	some_text VARCHAR(50)
+);
