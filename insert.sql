@@ -1,1 +1,1 @@
-INSERT INTO new_database2(some_text) VALUES("Привет");
+INSERT INTO new_table2(some_text) VALUES(456456);

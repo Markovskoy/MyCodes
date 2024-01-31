@@ -1,2 +1,1 @@
-SELECT * FROM new_database
-WHERE some_text like "%Привет%""
+SELECT * FROM new_table2;
