@@ -1,0 +1,1 @@
+INSERT INTO new_database2(some_text) VALUES("Привет");
