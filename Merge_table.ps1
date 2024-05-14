@@ -16,9 +16,3 @@ MERGE INTO [UsrUseMeLikeYouWant167] AS Target
 "
 
 Invoke-SQL -dataSource $dbaddress -database $dbname -sqlcommand $result_query
-
-sdfgsdfg
-
-dsfg
-
-sdfg
