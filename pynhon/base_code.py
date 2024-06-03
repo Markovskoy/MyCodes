@@ -1,1 +1,1 @@
-new code dfsdffgdsf dsfg
+print("Hello world")
