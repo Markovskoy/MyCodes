@@ -71,8 +71,23 @@ async def generate_response(context):
                 if "Misuse detected" in bot_reply:
                     print(f"[{model}] Misuse detected. Попытка {attempt + 1}/{max_retries}...")
                     continue  # Пробуем другую модель
+                
+                if random.random() < 0.6:  # 60% шанс на ответ без смайликов
+                    bot_reply = ''.join(c for c in bot_reply if c not in '😊💪😂😍😢🙌👍👎🔥❤✨').strip()
 
-                return bot_reply  # Возвращаем нормальный ответ
+                if random.random() < 0.5:  # 50% шанс на ответ без вопроса
+                    sentences = bot_reply.split('.') + bot_reply.split('!')
+                    bot_reply = '. '.join(sentences[:-1]) if len(sentences) > 1 else bot_reply
+
+                if random.random() < 0.5:  # 50% шанс на отправку вопроса вторым сообщением
+                    sentences = [s.strip() for s in bot_reply.split('.') if s.strip()]
+                    questions = [s for s in sentences if s.endswith('?')]
+                    if questions:
+                        bot_reply = '. '.join([s for s in sentences if not s.endswith('?')])
+                        question_to_send = questions[0]  # Отправляем первый найденный вопрос
+                        return bot_reply, question_to_send
+                    
+                return bot_reply, None  # Возвращаем нормальный ответ и None, если нет вопроса
             except Exception as e:
                 print(f"[{model}] Ошибка на попытке {attempt + 1}/{max_retries}: {e}")
                 await asyncio.sleep(2)  # Небольшая задержка перед повторной попыткой
@@ -119,7 +134,7 @@ async def process_message_queue():
                     # Устанавливаем статус "печатает"
                     await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
                     await asyncio.sleep(random.randint(3, 5))
-                    if random.random() < 0.25:  # 25% шанс на ответ с цитированием
+                    if random.random() < 0.45:  # 25% шанс на ответ с цитированием
                         await message.reply_text(bot_reply, quote=True)
                     else:
                         await message.reply_text(bot_reply)
