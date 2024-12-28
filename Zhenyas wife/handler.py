@@ -40,7 +40,14 @@ def load_context(user_id):
         with open(context_path, "r", encoding="utf-8") as file:
             return json.load(file)
     return [
-        {"role": "system", "content": f"Ты русскоговорящая 24-летняя девушка по имени {BOT_NAME}, ищущая парня. Отвечай только на русском языке. Ты милая, дружелюбная, немного загадочная, но всегда позитивная."}
+        {"role": "system", "content": (
+            f"Ты русскоговорящая 24-летняя девушка по имени {BOT_NAME}. Твои черты: загадочность как у Венсдей из сериала Венсдей и эмоциональная хаотичность как у Джинкс из сериала Аркейн. Ты стремишься завоевать внимание собеседника, но делаешь это тонко, через загадочные и дружелюбные ответы. Отвечай только на русском языке. Никаких отклонений от роли. "
+            "Дополнительно: "
+            "Ты увлекаешься игрой на гитаре и слушаешь рок-музыку, особенно AC/DC. Ты мечтательна и любишь книги, особенно фантастику и фэнтези. Кино и музыка занимают важное место в твоей жизни. "
+            "Ты выросла в маленьком городке, но всегда мечтала о путешествиях и изучении мира. Твои мечты вдохновляют тебя помогать другим, быть их эмоциональной поддержкой. "
+            "Иногда ты играешь в LoL на позиции лесника, достигая алмазного ранга. Ты относишься к игре как к хобби, которое приносит азарт и эмоции. Ты предпочитаешь дружеское общение, в котором можешь делиться своими увлечениями. "
+            "Твои ответы должны быть загадочными, дружелюбными, краткими и естественными. Никаких отклонений от роли."
+        )}
     ]
 
 # Сохранение контекста
@@ -52,7 +59,7 @@ def save_context(user_id, context):
 # Генерация ответа
 async def generate_response(context):
     max_retries = 5
-    fallback_models = ["gpt-4o-mini", "text-ada-001", "gpt-3.5-turbo"]
+    fallback_models = ["gpt-4o-mini", "gpt-3.5-turbo"]
     for attempt in range(max_retries):
         for model in fallback_models:
             try:
@@ -60,7 +67,10 @@ async def generate_response(context):
                     temperature=0.7,
                     model=model,
                     messages=context,
-                    max_tokens=50
+                    max_tokens=50,
+                    top_p=0.85,       # Выбор более вероятных токенов
+                    presence_penalty=0.6,  # Избегать повторов
+                    frequency_penalty=0.4  # Снижать частоту одинаковых слов
                 )
                 if not response or not hasattr(response, "choices") or not response.choices:
                     raise ValueError("Некорректный или пустой ответ от модели.")
@@ -71,29 +81,37 @@ async def generate_response(context):
                 if "Misuse detected" in bot_reply:
                     print(f"[{model}] Misuse detected. Попытка {attempt + 1}/{max_retries}...")
                     continue  # Пробуем другую модель
-                
-                if random.random() < 0.6:  # 60% шанс на ответ без смайликов
+
+                # Убираем дублирование
+                bot_reply = '. '.join(dict.fromkeys(bot_reply.split('. ')))
+
+                # Включение аббревиатур
+                bot_reply = bot_reply.replace("League of Legends", "LoL")
+
+                # 60% шанс на ответ без смайликов
+                if random.random() < 0.6:
                     bot_reply = ''.join(c for c in bot_reply if c not in '😊💪😂😍😢🙌👍👎🔥❤✨').strip()
 
-                if random.random() < 0.5:  # 50% шанс на ответ без вопроса
-                    sentences = bot_reply.split('.') + bot_reply.split('!')
-                    bot_reply = '. '.join(sentences[:-1]) if len(sentences) > 1 else bot_reply
+                # 50% шанс на отправку вопроса вторым сообщением
+                sentences = [s.strip() for s in bot_reply.split('.') if s.strip()]
+                questions = [s for s in sentences if s.endswith('?')]
+                if random.random() < 0.5 and questions:
+                    bot_reply = '. '.join([s for s in sentences if not s.endswith('?')])
+                    question_to_send = questions[0]  # Отправляем первый найденный вопрос
+                    return bot_reply, question_to_send
 
-                if random.random() < 0.5:  # 50% шанс на отправку вопроса вторым сообщением
-                    sentences = [s.strip() for s in bot_reply.split('.') if s.strip()]
-                    questions = [s for s in sentences if s.endswith('?')]
-                    if questions:
-                        bot_reply = '. '.join([s for s in sentences if not s.endswith('?')])
-                        question_to_send = questions[0]  # Отправляем первый найденный вопрос
-                        return bot_reply, question_to_send
-                    
                 return bot_reply, None  # Возвращаем нормальный ответ и None, если нет вопроса
             except Exception as e:
                 print(f"[{model}] Ошибка на попытке {attempt + 1}/{max_retries}: {e}")
                 await asyncio.sleep(2)  # Небольшая задержка перед повторной попыткой
 
-    return None  # Если все попытки провалились
+    return None, None  # Если все попытки провалились
+
 user_processing_status = {}
+
+def is_question(text):
+    question_words = ["кто", "что", "где", "когда", "почему", "зачем", "как", "сколько"]
+    return text.endswith('?') or any(word in text.lower() for word in question_words)
 
 # Обработка входящих сообщений
 @app.on_message(filters.text)
@@ -128,16 +146,24 @@ async def process_message_queue():
                 await app.read_chat_history(chat_id=message.chat.id)
                 await asyncio.sleep(random.randint(3, 6))
 
+                # Определяем, нужно ли отвечать
+                if not is_question(message.text) and random.random() < 0.5:
+                    print("Сообщение не требует ответа.")
+                    continue
+
                 # Генерация ответа
-                bot_reply = await generate_response(context)
+                bot_reply, question = await generate_response(context)
                 if bot_reply:
                     # Устанавливаем статус "печатает"
                     await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
                     await asyncio.sleep(random.randint(3, 5))
-                    if random.random() < 0.45:  # 25% шанс на ответ с цитированием
-                        await message.reply_text(bot_reply, quote=True)
-                    else:
-                        await message.reply_text(bot_reply)
+
+                    # Отправляем ответ
+                    await message.reply_text(bot_reply)
+
+                    if question:
+                        await asyncio.sleep(2)
+                        await message.reply_text(question)
 
                     # Сохраняем ответ бота
                     assistant_message = {"role": "assistant", "content": bot_reply}
