@@ -76,6 +76,7 @@ async def generate_response(context):
                 await asyncio.sleep(2)  # Небольшая задержка перед повторной попыткой
 
     return None  # Если все попытки провалились
+user_processing_status = {}
 
 # Обработка входящих сообщений
 @app.on_message(filters.text)
@@ -83,41 +84,65 @@ async def handle_message(client, message):
     global message_queue
     user_id = message.from_user.id
     print(f"Новое сообщение от {user_id}: {message.text}")
-    message_queue.append((user_id, message))
+
+    # Проверяем, обрабатывается ли уже сообщение от этого пользователя
+    if user_processing_status.get(user_id, False):
+        print(f"Сообщение от {user_id} добавлено в очередь.")
+        message_queue.append((user_id, message))
+    else:
+        # Устанавливаем статус обработки
+        user_processing_status[user_id] = True
+        message_queue.append((user_id, message))
 
 # Обработка очереди сообщений
 async def process_message_queue():
     while True:
         if message_queue:
             user_id, message = message_queue.popleft()
-            context = load_context(user_id)
+            try:
+                context = load_context(user_id)
 
-            # Добавляем сообщение пользователя
-            user_message = {"role": "user", "content": message.text}
-            context.append(user_message)
-            save_context(user_id, context)
-
-            # Читаем сообщение
-            await app.read_chat_history(chat_id=message.chat.id)
-            await asyncio.sleep(random.randint(3, 6))
-
-            # Генерация ответа
-            bot_reply = await generate_response(context)
-            if bot_reply:
-                # Отправляем сообщение
-                await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
-                await asyncio.sleep(random.randint(3, 5))
-                await message.reply_text(bot_reply)
-
-                # Сохраняем ответ бота
-                assistant_message = {"role": "assistant", "content": bot_reply}
-                context.append(assistant_message)
+                # Добавляем сообщение пользователя
+                user_message = {"role": "user", "content": message.text}
+                context.append(user_message)
                 save_context(user_id, context)
+
+                # Читаем сообщение
+                await app.read_chat_history(chat_id=message.chat.id)
+                await asyncio.sleep(random.randint(3, 6))
+
+                # Генерация ответа
+                bot_reply = await generate_response(context)
+                if bot_reply:
+                    # Устанавливаем статус "печатает"
+                    await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
+                    await asyncio.sleep(random.randint(3, 5))
+                    if random.random() < 0.25:  # 25% шанс на ответ с цитированием
+                        await message.reply_text(bot_reply, quote=True)
+                    else:
+                        await message.reply_text(bot_reply)
+
+                    # Сохраняем ответ бота
+                    assistant_message = {"role": "assistant", "content": bot_reply}
+                    context.append(assistant_message)
+                    save_context(user_id, context)
+            finally:
+                # Освобождаем пользователя после обработки сообщения
+                user_processing_status[user_id] = False
         else:
             await asyncio.sleep(1)
 
 # Основной запуск
 if __name__ == "__main__":
-    print("Бот запущен. Ожидаем сообщения...")
+    user_ids = [file.split('.')[0] for file in os.listdir(context_dir) if file.endswith('.json')]
+
+    if not user_ids:
+        print("Контекстов не найдено. Запускаем send_message...")
+        try:
+            subprocess.run(["python", "send_message.py"], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Ошибка выполнения send_message: {e}")
+    else:
+        print("Контексты найдены. Ожидаем сообщения...")
     asyncio.ensure_future(process_message_queue())
     app.run()
