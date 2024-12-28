@@ -8,6 +8,7 @@ from collections import deque
 import subprocess
 import sys
 
+
 # Установка политики события для Windows
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -56,6 +57,7 @@ async def generate_response(context):
         for model in fallback_models:
             try:
                 response = await g4f_client.chat.completions.create(
+                    temperature=0.7,
                     model=model,
                     messages=context,
                     max_tokens=50
