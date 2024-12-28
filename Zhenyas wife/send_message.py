@@ -1,8 +1,13 @@
 import json
 import asyncio
 import os
+import sys
 from pyrogram import Client
 from g4f.client import AsyncClient
+
+# Установить политику событий для Windows
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Замените на свои значения
 api_id = "9808094"
@@ -19,23 +24,27 @@ recipient_identifier = "+79524136263"
 context_dir = "contexts"
 os.makedirs(context_dir, exist_ok=True)
 
-# Генерация первого сообщения
-async def generate_initial_message():
-    try:
-        context = [
-            {"role": "system", "content": "Ты русскоговорящая 24-летняя девушка, ищущая парня. Отвечай дружелюбно, коротко, и только на русском языке."},
-            {"role": "user", "content": "Придумай первое сообщение, чтобы познакомиться с новым человеком."}
-        ]
-
-        response = await g4f_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=context,
-            max_tokens=50
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Ошибка генерации первого сообщения: {e}")
-        return "Привет! Хочешь познакомиться? 😊"
+# Генерация первого сообщения с повторными попытками
+async def generate_initial_message(max_retries=3):
+    context = [
+        {"role": "system", "content": "Ты русскоговорящая 24-летняя девушка, ищущая парня. Отвечай дружелюбно, коротко, и только на русском языке."},
+        {"role": "user", "content": "Придумай первое сообщение, чтобы познакомиться с новым человеком."}
+    ]
+    for attempt in range(max_retries):
+        try:
+            response = await g4f_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=context,
+                max_tokens=50
+            )
+            reply = response.choices[0].message.content.strip()
+            if "Misuse detected" not in reply:
+                return reply
+            print(f"Попытка {attempt + 1}/{max_retries}: получено 'Misuse detected'. Перепробуем...")
+        except Exception as e:
+            print(f"Ошибка генерации сообщения на попытке {attempt + 1}/{max_retries}: {e}")
+        await asyncio.sleep(2)
+    return "Привет! Хочешь познакомиться? 😊"
 
 # Загрузка контекста
 def load_context(user_id):
@@ -54,51 +63,35 @@ def save_context(user_id, context):
         json.dump(context, file, ensure_ascii=False, indent=4)
 
 # Отправка первого сообщения
-async def send_message(user_id, chat_id):
+async def send_message(recipient_identifier):
     try:
-        await app.start()
+        async with app:
+            user = await app.get_users(recipient_identifier)
+            user_id = user.id
+            chat_id = user.id
 
-        # Загрузка контекста
-        context = load_context(user_id)
+            # Загрузка контекста
+            context = load_context(user_id)
 
-        # Проверка, отправлено ли первое сообщение
-        if any(msg.get("role") == "assistant" for msg in context):
-            print(f"Сообщение уже отправлено пользователю {user_id}. Пропускаем отправку.")
-            return
+            # Проверка, отправлено ли первое сообщение
+            if any(msg.get("role") == "assistant" for msg in context):
+                print(f"Сообщение уже отправлено пользователю {user_id}. Пропускаем отправку.")
+                return
 
-        # Генерация первого сообщения
-        initial_message = await generate_initial_message()
+            # Генерация первого сообщения
+            initial_message = await generate_initial_message()
 
-        # Отправляем сообщение
-        await app.send_message(chat_id, initial_message)
-        print(f"Отправлено первое сообщение пользователю {user_id}: {initial_message}")
+            # Отправляем сообщение
+            await app.send_message(chat_id, initial_message)
+            print(f"Отправлено первое сообщение пользователю {user_id}: {initial_message}")
 
-        # Сохраняем в контекст
-        context.append({"role": "assistant", "content": initial_message})
-        save_context(user_id, context)
+            # Сохраняем в контекст
+            context.append({"role": "assistant", "content": initial_message})
+            save_context(user_id, context)
 
     except Exception as e:
         print(f"Ошибка отправки сообщения: {e}")
-    finally:
-        # Завершаем работу клиента
-        try:
-            await app.stop()
-            await asyncio.sleep(1)  # Даём время на завершение фоновых задач
-        except Exception as e:
-            print(f"Ошибка завершения клиента: {e}")
-
-# Упрощённая обработка событийного цикла
-def run_async_task(task):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(task)
-    finally:
-        # Завершаем оставшиеся задачи
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
 
 # Основной запуск
 if __name__ == "__main__":
-    user = asyncio.run(app.get_users(recipient_identifier))
-    run_async_task(send_message(user.id, user.id))
+    asyncio.run(send_message(recipient_identifier))
