@@ -8,7 +8,6 @@ from collections import deque
 import subprocess
 import sys
 
-
 # Установка политики события для Windows
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -63,52 +62,50 @@ async def generate_response(context):
     for attempt in range(max_retries):
         for model in fallback_models:
             try:
+                print(f"[INFO] Попытка {attempt + 1}/{max_retries} с использованием модели {model}.")
                 response = await g4f_client.chat.completions.create(
                     temperature=0.7,
                     model=model,
                     messages=context,
                     max_tokens=50,
-                    top_p=0.85,       # Выбор более вероятных токенов
-                    presence_penalty=0.6,  # Избегать повторов
-                    frequency_penalty=0.4  # Снижать частоту одинаковых слов
+                    top_p=0.85,
+                    presence_penalty=0.6,
+                    frequency_penalty=0.4
                 )
                 if not response or not hasattr(response, "choices") or not response.choices:
                     raise ValueError("Некорректный или пустой ответ от модели.")
 
                 bot_reply = response.choices[0].message.content.strip()
 
-                # Проверяем, содержит ли ответ ошибку
-                if "Misuse detected" in bot_reply:
-                    print(f"[{model}] Misuse detected. Попытка {attempt + 1}/{max_retries}...")
-                    continue  # Пробуем другую модель
-
                 # Убираем дублирование
                 bot_reply = '. '.join(dict.fromkeys(bot_reply.split('. ')))
 
-                # Включение аббревиатур
-                bot_reply = bot_reply.replace("League of Legends", "LoL")
-
-                # 60% шанс на ответ без смайликов
+                # Убираем смайлики с некоторой вероятностью
                 if random.random() < 0.6:
                     bot_reply = ''.join(c for c in bot_reply if c not in '😊💪😂😍😢🙌👍👎🔥❤✨').strip()
 
-                # 50% шанс на отправку вопроса вторым сообщением
-                sentences = [s.strip() for s in bot_reply.split('.') if s.strip()]
-                questions = [s for s in sentences if s.endswith('?')]
-                if random.random() < 0.5 and questions:
-                    bot_reply = '. '.join([s for s in sentences if not s.endswith('?')])
-                    question_to_send = questions[0]  # Отправляем первый найденный вопрос
-                    return bot_reply, question_to_send
+                # Фильтрация сообщений об ошибках
+                if "Misuse detected" in bot_reply or "Please get in touch" in bot_reply:
+                    print("[WARNING] Нежелательный ответ ИИ был получен и отфильтрован.")
+                    continue
 
-                return bot_reply, None  # Возвращаем нормальный ответ и None, если нет вопроса
+                print(f"[INFO] Успешный ответ от модели {model}.")
+                return bot_reply
             except Exception as e:
-                print(f"[{model}] Ошибка на попытке {attempt + 1}/{max_retries}: {e}")
-                await asyncio.sleep(2)  # Небольшая задержка перед повторной попыткой
+                print(f"[ERROR] Ошибка на попытке {attempt + 1}/{max_retries} с использованием модели {model}: {e}")
+                await asyncio.sleep(2)
 
-    return None, None  # Если все попытки провалились
+    print("[ERROR] Все попытки генерации ответа исчерпаны.")
+    return None
 
-user_processing_status = {}
+# Разделение ответа на предложения
+def split_reply(reply):
+    sentences = reply.split('. ')
+    if len(sentences) > 1:
+        return sentences[0].strip(), '. '.join(sentences[1:]).strip()
+    return reply, None
 
+# Проверка, является ли сообщение вопросом
 def is_question(text):
     question_words = ["кто", "что", "где", "когда", "почему", "зачем", "как", "сколько"]
     return text.endswith('?') or any(word in text.lower() for word in question_words)
@@ -118,60 +115,60 @@ def is_question(text):
 async def handle_message(client, message):
     global message_queue
     user_id = message.from_user.id
-    print(f"Новое сообщение от {user_id}: {message.text}")
+    print(f"[INFO] Новое сообщение от {user_id}: {message.text}")
 
-    # Проверяем, обрабатывается ли уже сообщение от этого пользователя
-    if user_processing_status.get(user_id, False):
-        print(f"Сообщение от {user_id} добавлено в очередь.")
-        message_queue.append((user_id, message))
-    else:
-        # Устанавливаем статус обработки
-        user_processing_status[user_id] = True
-        message_queue.append((user_id, message))
+    # Добавляем сообщение в очередь
+    message_queue.append((user_id, message))
 
 # Обработка очереди сообщений
 async def process_message_queue():
     while True:
         if message_queue:
             user_id, message = message_queue.popleft()
-            try:
-                context = load_context(user_id)
+            context = load_context(user_id)
 
-                # Добавляем сообщение пользователя
-                user_message = {"role": "user", "content": message.text}
-                context.append(user_message)
-                save_context(user_id, context)
+            user_message = {"role": "user", "content": message.text}
+            context.append(user_message)
+            save_context(user_id, context)
 
-                # Читаем сообщение
-                await app.read_chat_history(chat_id=message.chat.id)
-                await asyncio.sleep(random.randint(3, 6))
+            # Чтение сообщения
+            print(f"[INFO] Бот читает сообщение от {user_id}.")
+            await app.read_chat_history(chat_id=message.chat.id)
+            await asyncio.sleep(1)  # Задержка перед началом "печатает"
 
-                # Определяем, нужно ли отвечать
-                if not is_question(message.text) and random.random() < 0.5:
-                    print("Сообщение не требует ответа.")
+            # Устанавливаем статус "печатает"
+            print(f"[INFO] Бот печатает для {user_id}.")
+            await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
+            typing_time = random.randint(3, 5)
+
+            bot_reply = None
+            if is_question(message.text):
+                bot_reply = await generate_response(context)
+            else:
+                # Ожидаем новое сообщение в течение 2 секунд
+                await asyncio.sleep(2)
+                if len(message_queue) > 0 and message_queue[0][0] == user_id:
+                    print(f"[INFO] Пропускаем сообщение от {user_id}, ожидаем следующее.")
                     continue
 
-                # Генерация ответа
-                bot_reply, question = await generate_response(context)
-                if bot_reply:
-                    # Устанавливаем статус "печатает"
+                if random.random() < 0.5:
+                    bot_reply = await generate_response(context)
+
+            if bot_reply:
+                first_part, second_part = split_reply(bot_reply)
+
+                await asyncio.sleep(typing_time)  # Минимум 3 секунды "печатает"
+                await message.reply_text(first_part)
+
+                if second_part:
+                    await asyncio.sleep(2)  # Задержка перед вторым сообщением
                     await app.send_chat_action(chat_id=message.chat.id, action=enums.ChatAction.TYPING)
-                    await asyncio.sleep(random.randint(3, 5))
+                    await asyncio.sleep(typing_time)
+                    await message.reply_text(second_part)
 
-                    # Отправляем ответ
-                    await message.reply_text(bot_reply)
-
-                    if question:
-                        await asyncio.sleep(2)
-                        await message.reply_text(question)
-
-                    # Сохраняем ответ бота
-                    assistant_message = {"role": "assistant", "content": bot_reply}
-                    context.append(assistant_message)
-                    save_context(user_id, context)
-            finally:
-                # Освобождаем пользователя после обработки сообщения
-                user_processing_status[user_id] = False
+                assistant_message = {"role": "assistant", "content": bot_reply}
+                context.append(assistant_message)
+                save_context(user_id, context)
         else:
             await asyncio.sleep(1)
 
@@ -180,12 +177,12 @@ if __name__ == "__main__":
     user_ids = [file.split('.')[0] for file in os.listdir(context_dir) if file.endswith('.json')]
 
     if not user_ids:
-        print("Контекстов не найдено. Запускаем send_message...")
+        print("[INFO] Контекстов не найдено. Запускаем send_message...")
         try:
             subprocess.run(["python", "send_message.py"], check=True)
         except subprocess.CalledProcessError as e:
-            print(f"Ошибка выполнения send_message: {e}")
+            print(f"[ERROR] Ошибка выполнения send_message: {e}")
     else:
-        print("Контексты найдены. Ожидаем сообщения...")
+        print("[INFO] Контексты найдены. Ожидаем сообщения...")
     asyncio.ensure_future(process_message_queue())
     app.run()
