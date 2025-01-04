@@ -19,7 +19,7 @@ app = Client("my_bot", api_id=api_id, api_hash=api_hash)
 g4f_client = AsyncClient()
 
 # Укажите username (без @) или номер телефона
-recipient_identifier = "+79524136263"
+recipient_identifier = "shygenkillme"
 
 # Папка для хранения контекстов
 context_dir = "contexts"
