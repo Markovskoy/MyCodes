@@ -1,50 +1,48 @@
 ﻿import paramiko
+import logging
 import getpass
 
-hosts = [
-    #"10.12.151.250"
-]
+# Настройка логирования
+logging.basicConfig(filename="result.txt", level=logging.INFO, format="%(asctime)s - %(message)s", encoding="utf-8")
 
-
-username = "markovskoy_vv"
-password = getpass.getpass("Введите пароль: ")
-command = "echo -e 'проверка добавления' | sudo tee -a /home/markovskoy_vv/test && cat /home/markovskoy_vv/test"
-
-
-def execute_command_on_server(host):
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy()) 
-
+def execute_command_on_server(host, username, password, command):
     try:
-        client.connect(host, port=22, username=username, password=password)
+        with paramiko.SSHClient() as client:
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(host, port=22, username=username, password=password, timeout=5)
 
+            logging.info(f"Подключение к серверу {host}")
+            print(f"Подключение к серверу {host}")
 
-        print("Открытие сессии с правами root...")
-        stdin, stdout, stderr = client.exec_command(f"echo {password} | sudo -S -p '' {command}", get_pty=True)
- 
-        output = stdout.read().decode()  
-        error = stderr.read().decode()   
+            stdin, stdout, stderr = client.exec_command(f"echo {password} | sudo -S -p '' {command}", get_pty=True)
+            
+            output = stdout.read().decode()
+            error = stderr.read().decode()
 
-        client.close()
-
-        with open("to_dima.txt", "a", encoding="utf-8") as file:
             if error and "пароль" not in error.lower():
-                result = f"Ошибка на сервере {host}: {error}\n"
+                logging.error(f"Ошибка на сервере {host}: {error}")
+                print(f"Ошибка на сервере {host}: {error}")
             else:
-                result = f"Результат от сервера {host}:\n{output}\n"
-            print(result)
-            file.write(result)
+                logging.info(f"Результат от сервера {host}:\n{output}")
+                print(f"Результат от сервера {host}:\n{output}")
 
+    except paramiko.ssh_exception.NoValidConnectionsError as e:
+        logging.error(f"Не удалось подключиться к {host}: {e}")
+        print(f"Не удалось подключиться к {host}: {e}")
     except Exception as e:
-        error_msg = f"Ошибка подключения к серверу {host}: {e}\n"
-        print(error_msg)
-        with open("to_dima.txt", "a", encoding="utf-8") as file:
-            file.write(error_msg)
+        logging.error(f"Ошибка на сервере {host}: {e}")
+        print(f"Ошибка на сервере {host}: {e}")
 
+def run_ssh_commands(hosts, username, password, command):
+    for host in hosts:
+        execute_command_on_server(host, username, password, command)
 
-for host in hosts:
-    connect_msg = f"Подключение к серверу {host}\n"
-    print(connect_msg)
-    with open("to_dima.txt", "a", encoding="utf-8") as file:
-            file.write(connect_msg)
-    execute_command_on_server(host)
+# Входные данные
+hosts = ["10.12.151.250"]
+username = input("Введите логин: ")
+password = getpass.getpass("Введите пароль: ")
+#command = "echo -e 'проверка добавления' | sudo tee -a /home/markovskoy_vv/test && cat /home/markovskoy_vv/test"
+command = input("Введите команду Linux: ")
+
+# Запуск
+run_ssh_commands(hosts, username, password, command)
